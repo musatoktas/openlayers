@@ -821,6 +821,70 @@ describe('ol.interaction.Snap', function () {
         assert.lengthOf(intersections1, 0);
       });
     }
+
+    describe('in a user projection', () => {
+      beforeEach(() => {
+        useGeographic();
+      });
+
+      afterEach(() => {
+        clearUserProjection();
+      });
+
+      for (const self of [false, true]) {
+        it(`calculates intersections in the view projection (self: ${self})`, function () {
+          const features = self
+            ? [
+                new Feature(
+                  new LineString([
+                    [0, 0],
+                    [40, 60],
+                    [0, 60],
+                    [40, 0],
+                  ]),
+                ),
+              ]
+            : [
+                new Feature(
+                  new LineString([
+                    [0, 0],
+                    [40, 60],
+                  ]),
+                ),
+                new Feature(
+                  new LineString([
+                    [0, 60],
+                    [40, 0],
+                  ]),
+                ),
+              ];
+          const snapInteraction = new Snap({
+            features: new Collection(features),
+            intersection: true,
+          });
+          snapInteraction.setMap(
+            new Map({view: new View({projection: 'EPSG:3857'})}),
+          );
+
+          const intersections = snapInteraction.rBush_
+            .getAll()
+            .filter((item) => item.intersectionFeature);
+          assert.lengthOf(intersections, 1);
+
+          // The lines are straight in the view projection, so the
+          // intersection is half way between their ends in EPSG:3857
+          const end = transform([40, 60], 'EPSG:4326', 'EPSG:3857');
+          const expected = transform(
+            [end[0] / 2, end[1] / 2],
+            'EPSG:3857',
+            'EPSG:4326',
+          );
+          const intersection = intersections[0].segment[0];
+          assert.approximately(intersection[0], expected[0], 1e-9);
+          assert.approximately(intersection[1], expected[1], 1e-9);
+        });
+      }
+    });
   });
 
   describe('Custom segmenters', () => {
