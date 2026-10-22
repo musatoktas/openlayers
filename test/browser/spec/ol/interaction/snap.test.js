@@ -650,6 +650,64 @@ describe('ol.interaction.Snap', function () {
       });
       snapInteraction.handleEvent(event);
     });
+
+    it('snaps to intersections in the projection of a new view', () => {
+      const lines = [
+        new Feature(
+          new LineString([
+            [0, 0],
+            [40, 60],
+          ]),
+        ),
+        new Feature(
+          new LineString([
+            [0, 60],
+            [40, 0],
+          ]),
+        ),
+      ];
+      map.setView(
+        new View({projection: 'EPSG:4326', center: [20, 30], zoom: 6}),
+      );
+      map.renderSync();
+
+      const snapInteraction = new Snap({
+        features: new Collection(lines),
+        intersection: true,
+        vertex: false,
+        edge: false,
+      });
+      snapInteraction.setMap(map);
+
+      map.setView(new View({center: [20, 35], zoom: 6}));
+      map.renderSync();
+
+      const intersections = snapInteraction.rBush_
+        .getAll()
+        .filter((item) => item.intersectionFeature);
+      assert.lengthOf(intersections, 1);
+
+      // The lines are straight in EPSG:3857 now, so the intersection is half
+      // way between their ends in EPSG:3857
+      const end = transform([40, 60], 'EPSG:4326', 'EPSG:3857');
+      const expected = transform(
+        [end[0] / 2, end[1] / 2],
+        'EPSG:3857',
+        'EPSG:4326',
+      );
+      const expectedPixel = map.getPixelFromCoordinate(expected);
+      const event = eventFromPixel([
+        Math.round(expectedPixel[0]) + 3,
+        Math.round(expectedPixel[1]) + 3,
+      ]);
+      const listener = vi.fn();
+      snapInteraction.on('snap', listener);
+      snapInteraction.handleEvent(event);
+
+      assert.strictEqual(listener.mock.calls.length, 1);
+      assert.approximately(event.coordinate[0], expected[0], 1e-9);
+      assert.approximately(event.coordinate[1], expected[1], 1e-9);
+    });
   });
 
   describe('setMap', function () {
@@ -685,6 +743,17 @@ describe('ol.interaction.Snap', function () {
       snapInteraction.setMap(null);
       assert.strictEqual(snapInteraction.getMap(), null);
       assert.strictEqual(feature.getListeners('change'), undefined);
+    });
+
+    it('adds and removes a map view listener', function () {
+      const snapInteraction = new Snap({
+        features: featureCollection,
+      });
+      const count = map.getListeners('change:view').length;
+      snapInteraction.setMap(map);
+      assert.strictEqual(map.getListeners('change:view').length, count + 1);
+      snapInteraction.setMap(null);
+      assert.strictEqual(map.getListeners('change:view').length, count);
     });
   });
 

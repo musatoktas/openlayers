@@ -2,6 +2,7 @@
  * @module ol/interaction/Snap
  */
 import CollectionEventType from '../CollectionEventType.js';
+import MapProperty from '../MapProperty.js';
 import {
   closestOnCircle,
   closestOnSegment,
@@ -21,6 +22,7 @@ import {fromCircle} from '../geom/Polygon.js';
 import {getIntersectionPoint} from '../geom/flat/segments.js';
 import {clear} from '../obj.js';
 import {
+  equivalent,
   fromUserCoordinate,
   getUserProjection,
   toUserCoordinate,
@@ -400,6 +402,12 @@ class Snap extends PointerInteraction {
     this.featuresListenerKeys_ = [];
 
     /**
+     * @type {import("../events.js").EventsKey|null}
+     * @private
+     */
+    this.viewChangeListenerKey_ = null;
+
+    /**
      * @type {Object<string, import("../events.js").EventsKey>}
      * @private
      */
@@ -692,6 +700,35 @@ class Snap extends PointerInteraction {
   }
 
   /**
+   * Re-index all features when the map gets a view with a different
+   * projection, because segments of circles and intersections depend on the
+   * view projection.
+   * @param {import("../Object.js").ObjectEvent} evt Event.
+   * @private
+   */
+  handleViewChange_(evt) {
+    const map = this.getMap();
+    if (!map) {
+      return;
+    }
+    const oldView = /** @type {import("../View.js").default} */ (evt.oldValue);
+    const projection = map.getView().getProjection();
+    if (oldView && equivalent(oldView.getProjection(), projection)) {
+      return;
+    }
+    this.rBush_.clear();
+    clear(this.indexedFeaturesExtents_);
+    clear(this.pendingFeatures_);
+    let features = this.getFeatures_();
+    if (!Array.isArray(features)) {
+      features = features.getArray();
+    }
+    for (const feature of features) {
+      this.addFeature(feature, false);
+    }
+  }
+
+  /**
    * Handle pointer up events.
    * @param {import("../MapBrowserEvent.js").default} evt Event.
    * @return {boolean} If the event was consumed.
@@ -752,6 +789,10 @@ class Snap extends PointerInteraction {
     if (currentMap) {
       keys.forEach(unlistenByKey);
       keys.length = 0;
+      if (this.viewChangeListenerKey_) {
+        unlistenByKey(this.viewChangeListenerKey_);
+        this.viewChangeListenerKey_ = null;
+      }
       this.rBush_.clear();
       Object.values(this.featureChangeListenerKeys_).forEach(unlistenByKey);
       this.featureChangeListenerKeys_ = {};
@@ -759,6 +800,14 @@ class Snap extends PointerInteraction {
     super.setMap(map);
 
     if (map) {
+      this.viewChangeListenerKey_ = listen(
+        map,
+        `change:${MapProperty.VIEW}`,
+        /** @type {import("../events.js").ListenerFunction} */ (
+          this.handleViewChange_
+        ),
+        this,
+      );
       if (this.features_) {
         keys.push(
           listen(
